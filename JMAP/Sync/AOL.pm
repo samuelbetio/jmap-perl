@@ -1,0 +1,123 @@
+#!/usr/bin/perl -c
+
+use strict;
+use warnings;
+
+package JMAP::Sync::AOL;
+use base qw(JMAP::Sync::Common);
+
+use Mail::GmailTalk;
+use JSON::XS qw(decode_json);
+use Email::Simple;
+use Email::Sender::Simple qw(sendmail);
+use Email::Sender::Transport::GmailSMTP;
+use Net::CalDAVTalk;
+use Net::CardDAVTalk;
+use OAuth2::Tiny;
+
+my $O;
+sub O {
+  unless ($O) {
+    local $/;
+    open(FH, '<', "/home/jmap/jmap-perl/config.json");
+    my $config = decode_json(<FH>);
+    close(FH);
+    $O = OAuth2::Tiny->new(%{$config->{aol}});
+  }
+  return $O;
+}
+
+sub access_token {
+  my $Self = shift;
+  unless ($Self->{access_token}) {
+    my $refresh_token = $Self->{auth}{password};
+    my $O = $Self->O();
+    my $data = $O->refresh($refresh_token);
+    $Self->{access_token} = $data->{access_token};
+  }
+  return $Self->{access_token};
+}
+
+sub connect_calendars {
+  my $Self = shift;
+
+  if ($Self->{calendars}) {
+    $Self->{lastused} = time();
+    return $Self->{calendars};
+  }
+
+  $Self->{calendars} = Net::CalDAVTalk->new(
+    user => $Self->{auth}{username},
+    access_token => $Self->access_token(),
+    url => $Self->{auth}{caldavURL},
+    expandurl => 1,
+  );
+
+  return $Self->{calendars};
+}
+
+sub connect_contacts {
+  my $Self = shift;
+
+  if ($Self->{contacts}) {
+    $Self->{lastused} = time();
+    return $Self->{contacts};
+  }
+
+  $Self->{contacts} = Net::CardDAVTalk->new(
+    user => $Self->{auth}{username},
+    access_token => $Self->access_token(),
+    url => $Self->{auth}{carddavURL},
+    expandurl => 1,
+  );
+
+  return $Self->{contacts};
+}
+
+sub connect_imap {
+  my $Self = shift;
+
+  if ($Self->{imap}) {
+    $Self->{lastused} = time();
+    return $Self->{imap};
+  }
+
+  for (1..3) {
+    my $port = $Self->{auth}{imapPort};
+    my $usessl = 1;
+    $Self->{imap} = Mail::GmailTalk->new(
+      Server   => $Self->{auth}{imapHost},
+      Port     => $port,
+      Username => $Self->{auth}{username},
+      Password => $Self->access_token(),
+      # not configurable right now...
+      UseSSL   => $usessl,
+      UseBlocking => $usessl,
+    );
+    next unless $Self->{imap};
+    $Self->{lastused} = time();
+    return $Self->{imap};
+  }
+
+  die "Could not connect to IMAP server: $@";
+}
+
+sub send_email {
+  my $Self = shift;
+  my $rfc822 = shift;
+
+  my $email = Email::Simple->new($rfc822);
+  sendmail($email, {
+    from => $Self->{auth}{username},
+    transport => Email::Sender::Transport::GmailSMTP->new({
+      helo => $ENV{jmaphost},
+      host => $Self->{auth}{smtpHost},
+      port => $Self->{auth}{smtpPort},
+      ssl => 1,
+      sasl_username => $Self->{auth}{username},
+      access_token => $Self->access_token(),
+    })
+  });
+}
+
+1;
