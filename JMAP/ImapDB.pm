@@ -150,7 +150,7 @@ sub sync_folders {
   my %seen;
 
   my %getstatus;
-  my %getuniqueid;
+  
   foreach my $name (sort keys %$folders) {
     my $sep = $folders->{$name}[0];
     my $label = $folders->{$name}[1];
@@ -166,9 +166,7 @@ sub sync_folders {
       # no uidvalidity, we need to get status for this one
       $getstatus{$name} = $id;
     }
-    unless ($ibylabel{$label}{uniqueid}) {
-      $getuniqueid{$name} = $id;
-    }
+
   }
 
   foreach my $folder (@$ifolders) {
@@ -193,19 +191,6 @@ sub sync_folders {
         uidfirst => $status->{uidnext},
         highestmodseq => $status->{highestmodseq},
       }, {ifolderid => $getstatus{$name}});
-    }
-    $Self->commit();
-  }
-
-  if (keys %getuniqueid) {
-    my $data = $Self->backend_cmd('imap_getuniqueid', [keys %getuniqueid]);
-    $Self->begin();
-    foreach my $name (keys %$data) {
-      my $status = $data->{$name};
-      next unless ref($status) eq 'HASH';
-      eval { $Self->dmaybeupdate('ifolders', {
-        uniqueid => $status->{'/vendor/cmu/cyrus-imapd/uniqueid'},
-      }, {ifolderid => $getstatus{$name}}); };
     }
     $Self->commit();
   }
@@ -240,8 +225,8 @@ sub sync_jmailboxes {
     shift @bits if $bits[0] eq '[Gmail]'; # we special case this GMail magic
     next unless @bits; # also skip the magic '[Gmail]' top-level
     my $role = $ROLE_MAP{lc $folder->{label}};
-    my $id = '';
-    my $parentId = '';
+    my $id = 0;
+    my $parentId = 0;
     my $name;
     my $sortOrder = 3;
     $sortOrder = 2 if $role;
@@ -255,9 +240,7 @@ sub sync_jmailboxes {
         if (@bits) {
           # need to create intermediate folder ...
           # XXX  - label noselect?
-          my $id = new_uuid_string();
-          $Self->dmake('jmailboxes', {name => $name, jmailboxid => $id, sortOrder => 4, parentId => $parentId});
-          $byname{$parentId}{$name} = $id;
+          $id = $Self->dmake('jmailboxes', {name => $name, sortOrder => 4, parentId => $parentId});
         }
       }
     }
@@ -292,8 +275,7 @@ sub sync_jmailboxes {
         $Self->dmaybedirty('jmailboxes', {active => 1, %details}, {jmailboxid => $id});
       }
       else {
-        $id = $folder->{uniqueid} || new_uuid_string();
-        $Self->dmake('jmailboxes', {role => $role, jmailboxid => $id, %details});
+        $id = $Self->dmake('jmailboxes', {role => $role, %details});
         $byname{$parentId}{$name} = $id;
         $roletoid{$role} = $id if $role;
       }
@@ -308,7 +290,7 @@ sub sync_jmailboxes {
   else {
     # outbox - magic
     my $outbox = {
-      parentId => '',
+      parentId => 0,
       name => 'Outbox',
       role => 'outbox',
       sortOrder => 2,
@@ -331,7 +313,7 @@ sub sync_jmailboxes {
   else {
     # archive - magic
     my $archive = {
-      parentId => '',
+      parentId => 0,
       name => 'Archive',
       role => 'archive',
       sortOrder => 2,
@@ -754,27 +736,11 @@ sub _trimh {
   return $val;
 }
 
-sub calclabels {
-  my $Self = shift;
-  my $forcelabel = shift;
-  my $data = shift;
-
-  return ($forcelabel) if $forcelabel;
-  return (@{$data->{'x-gm-labels'}}) if $data->{'x-gm-labels'};
-  die "No way to calculate labels for " . Dumper($data);
-}
-
 sub calcmsgid {
   my $Self = shift;
   my $imapname = shift;
   my $uid = shift;
   my $data = shift;
-
-  return ($data->{"x-gm-msgid"}, $data->{"x-gm-thrid"})
-    if ($data->{"x-gm-msgid"} and $data->{"x-gm-thrid"});
-
-  return ($data->{"digest.sha1"}, $data->{"cid"})
-    if ($data->{"digest.sha1"} and $data->{"cid"});
 
   my $envelope = $data->{envelope};
   my $coded = $json->encode([$envelope]);
@@ -821,12 +787,12 @@ sub do_folder {
       my $end = $uidfirst - 1;
       $uidfirst -= $batchsize;
       $uidfirst = 1 if $uidfirst < 1;
-      $fetches{backfill} = [$uidfirst, $end, 1];
+      $fetches{backfill} = [@immutable, @mutable]];
     }
   }
   else {
-    $fetches{new} = [$uidnext, '*', 1];
-    $fetches{update} = [$uidfirst, $uidnext - 1, 0, $highestmodseq];
+    $fetches{new} = [@immutable, @mutable]];
+    $fetches{update} = [@mutable], $highestmodseq];
   }
 
   $Self->commit();
@@ -878,8 +844,15 @@ sub do_folder {
   if ($res->{new}) {
     my $new = $res->{new}[1];
     foreach my $uid (sort { $a <=> $b } keys %$new) {
-      my ($msgid, $thrid) = $Self->calcmsgid($imapname, $uid, $new->{$uid});
-      my @labels = $Self->calclabels($forcelabel, $new->{$uid});
+     my ($msgid, $thrid, @labels);
+     if ($Self->{is_gmail}) {
+        ($msgid, $thrid) = ($new->{$uid}{"x-gm-msgid"}, $new->{$uid}{"x-gm-thrid"});		
+     @labels = $forcelabel ? ($forcelabel) : @{$new->{$uid}{"x-gm-labels"}};		
+     }		
+      else {		
+      ($msgid, $thrid) = $Self->calcmsgid($imapname, $uid, $new->{$uid});		
+      @labels = ($forcelabel);		
+     }
       $Self->new_record($ifolderid, $uid, $new->{$uid}{'flags'}, \@labels, $new->{$uid}{envelope}, str2time($new->{$uid}{internaldate}), $msgid, $thrid, $new->{$uid}{'rfc822.size'});
     }
   }
