@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+<link href='https://fonts.googleapis.com/css?family=Source+Sans+Pro:300,400,600,700,400italic' rel='stylesheet' type='text/css'>
+<link href="/main.css" rel="stylesheet" type="text/css">
+<title>JMAP Proxy</title>
+</head>
+<body>
+<header>
+<div id="logo">JMAP</div>
+<ul id="nav" style="left:0">
+    <li class="nav-item"><a class="nav-link" href="http://jmap.io/index.html">Intro</a></li>
+    <li class="nav-item"><a class="nav-link" href="http://jmap.io/spec.html">The Spec</a> </li>
+    <li class="nav-item"><a class="nav-link" href="http://jmap.io/client.html">Using JMAP</a></li>
+    <li class="nav-item"><a class="nav-link" href="http://jmap.io/server.html">Implementing JMAP</a></li>
+    <li class="nav-item"><a class="nav-link" href="/">Try It</a></li>
+</ul>
+<a id="github" href="https://github.com/jmapio"><img style="position: absolute; top: 0; right: 0; border: 0;" src="https://s3.amazonaws.com/github/ribbons/forkme_right_darkblue_121621.png" alt="Fork me on GitHub"></a>
+</header>
+<article style="padding:0">
+
+<h1>JMAP Proxy</h1>
+
+[% sessions %]
+
+<p>Oauth to a <a href="/register/gmail">Gmail</a> or <a href="/register/aol">AOL</a> account, or log in to an IMAP server below:</p>
+
+<form action="/signup" method="post">
+<table border="1">
+<tr>
+  <th>Email</th>
+  <td><input type="text" name="username"></td>
+</tr>
+<tr>
+  <th>Password</th>
+  <td><input type="password" name="password"></td>
+</tr>
+<tr>
+  <th>Submit</th>
+  <td><input type="submit" value="Create"></td>
+</tr>
+</table>
+</form>
+
+<p>The JMAP proxy is a work in a progress. It is currently stable enough to test out and get a feel for JMAP in action. All the methods in the spec are implemented, though some atomic guarantees are not possible with other users accessing your servers at the same time</p>
+
+<p>The eventual goal is to have a proxy you can stick in front of any IMAP server and get a usable JMAP out the other end. The proxy supports Gmail and modern IMAP implementations (it will be quite inefficient if they don't implement CONDSTORE). Source code is <a href="https://github.com/jmapio/jmap-perl">available on GitHub</a> and is MIT licensed.</p>
+
+<p>The web client hooked up for this demo is a simple example (no compose, contacts, calendars). It is also MIT licenced and <a href="https://github.com/jmapio/jmap-demo-webmail">available on GitHub</a>. The code is unminified, so takes much longer to initially load than it would in a production setting, but can be viewed with standard web-dev tools. These can also show the data exchanges being made to load the data and get delta updates.</p>
+
+<p>The service is not running with all of the security measures employed on a production site such as FastMail, so DO NOT USE THIS PROXY FOR ACCOUNTS WITH SENSITIVE DATA.</p>
+
+<p>When you create your account, the most recent 50 emails will be downloaded in their entirety, so the first page should be snappy immediately.  After that, you are redirected to the landing page.  A background task will continue to pull in batches of messages and add them to your account, so you will see older messages appear while you are using the interface.</p>
+</article>
+</body>
+</html>
